@@ -112,8 +112,16 @@ async def lifespan(app: FastAPI):
 
     engine.on_tick(broadcast_state)
 
-    # Start engine in background
-    engine_task = asyncio.create_task(engine.start())
+    # Start engine in background with a small delay
+    # so uvicorn can finish binding to the port first.
+    # The engine's first tick does heavy synchronous work
+    # (scanning hundreds of processes) which would starve
+    # the event loop and block port binding.
+    async def _delayed_engine_start():
+        await asyncio.sleep(1.0)
+        await engine.start()
+
+    engine_task = asyncio.create_task(_delayed_engine_start())
     logger.info("IARIS API server started")
 
     yield
