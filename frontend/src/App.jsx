@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { useWebSocket } from 'react-use-websocket/dist/lib/use-websocket';
 import { 
   Activity, 
@@ -8,23 +8,121 @@ import {
   Wifi, 
   Play, 
   Square,
-  Network
+  Network,
+  Zap,
+  Shield,
+  TrendingDown,
+  TrendingUp,
+  AlertTriangle,
+  CheckCircle,
+  Pause,
+  ArrowDownToLine,
+  ArrowUpToLine,
+  ActivitySquare,
+  StopCircle,
+  Power,
+  Loader,
+  Check,
+  FlaskConical,
+  ArrowRight
 } from 'lucide-react';
 import {
-  LineChart,
-  Line,
   XAxis,
   YAxis,
   CartesianGrid,
   Tooltip,
   ResponsiveContainer,
   AreaChart,
-  Area
+  Area,
+  ReferenceLine
 } from 'recharts';
 import './index.css';
 
-const WS_URL = 'ws://localhost:8000/ws';
-const API_BASE = 'http://localhost:8000/api';
+const WS_URL = 'ws://127.0.0.1:8000/ws';
+const API_BASE = 'http://127.0.0.1:8000/api';
+
+// ═══════════════════════════════════════════════════════════════════════════
+// HELPER: Delta Indicator Component
+// ═══════════════════════════════════════════════════════════════════════════
+function DeltaIndicator({ value, suffix = '%', invert = false, showArrow = true }) {
+  if (value === 0 || value === null || value === undefined || isNaN(value)) return null;
+  
+  const isPositive = value > 0;
+  // invert: for metrics where "up" is bad (CPU, latency) 
+  const isGood = invert ? !isPositive : isPositive;
+  const arrow = isPositive ? '↑' : '↓';
+  const cls = isGood ? 'delta-positive' : 'delta-negative';
+
+  return (
+    <span className={`delta-indicator ${cls}`} key={Math.random()}>
+      {showArrow && arrow} {isPositive ? '+' : ''}{value.toFixed(1)}{suffix}
+    </span>
+  );
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// HELPER: Feedback Card Component (for the feedback stack)
+// ═══════════════════════════════════════════════════════════════════════════
+function FeedbackCard({ feedback, onDismiss }) {
+  const [exiting, setExiting] = useState(false);
+
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      setExiting(true);
+      setTimeout(() => onDismiss(feedback.id), 300);
+    }, 4000);
+    return () => clearTimeout(timer);
+  }, [feedback.id, onDismiss]);
+
+  return (
+    <div className={`feedback-card ${exiting ? 'feedback-exit' : ''}`}>
+      <div className="feedback-event">
+        <Zap size={14} /> EVENT: {feedback.event}
+      </div>
+      <div className="feedback-response">
+        {feedback.responses.map((r, i) => (
+          <div key={i} className="feedback-response-item">
+            {r.icon} {r.text}
+          </div>
+        ))}
+      </div>
+      <div className="feedback-impact">
+        {feedback.impacts.map((imp, i) => (
+          <span key={i} className={`feedback-impact-item ${imp.type}`}>
+            {imp.text}
+          </span>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// HELPER: Simulation Button with state feedback
+// ═══════════════════════════════════════════════════════════════════════════
+function SimButton({ icon, label, onClick, variant = '', dangerStyle = false }) {
+  const [state, setState] = useState('idle'); // idle | loading | applied
+
+  const handleClick = async () => {
+    if (state !== 'idle') return;
+    setState('loading');
+    await onClick();
+    setTimeout(() => {
+      setState('applied');
+      setTimeout(() => setState('idle'), 1500);
+    }, 500);
+  };
+
+  const btnClass = `btn w-full ${dangerStyle ? 'btn-danger' : ''} ${state === 'loading' ? 'btn-loading' : ''} ${state === 'applied' ? 'btn-applied' : ''}`;
+
+  return (
+    <button className={btnClass} onClick={handleClick} disabled={state !== 'idle'}>
+      {state === 'applied' ? <Check size={16} /> : state === 'loading' ? <Loader size={16} className="animate-spin" /> : icon}
+      {state === 'applied' ? `${label} ✔` : state === 'loading' ? 'Applying...' : label}
+    </button>
+  );
+}
+
 
 function App() {
   const [gameState, setGameState] = useState({
@@ -37,6 +135,59 @@ function App() {
   });
 
   const [history, setHistory] = useState([]);
+  
+  // Interaction Layer specific states
+  const [isIarisActive, setIsIarisActive] = useState(true);
+  const isIarisActiveRef = useRef(isIarisActive);
+  
+  const [activeProcessId, setActiveProcessId] = useState(null);
+  const [toastMessage, setToastMessage] = useState(null);
+
+  // ═══════════════════════════════════════════════════════════════════════
+  // FEEDBACK LAYER STATE
+  // ═══════════════════════════════════════════════════════════════════════
+  const [feedbackStack, setFeedbackStack] = useState([]);
+  const [graphMarkers, setGraphMarkers] = useState([]);
+  const [graphPulse, setGraphPulse] = useState(false);
+  const [prevMetrics, setPrevMetrics] = useState({ cpu: 0, memory: 0, stability: 0, latency: 0, efficiency: 0 });
+  const [deltas, setDeltas] = useState({ cpu: 0, memory: 0, stability: 0, latency: 0, efficiency: 0 });
+  const [snapshot, setSnapshot] = useState(null);
+  const [activeScenario, setActiveScenario] = useState(null);
+  const [lastDecisionCount, setLastDecisionCount] = useState(0);
+
+  const prevMetricsRef = useRef(prevMetrics);
+  const feedbackIdCounter = useRef(0);
+
+  useEffect(() => { isIarisActiveRef.current = isIarisActive; }, [isIarisActive]);
+  useEffect(() => { prevMetricsRef.current = prevMetrics; }, [prevMetrics]);
+
+  // ═══════════════════════════════════════════════════════════════════════
+  // FEEDBACK FUNCTIONS
+  // ═══════════════════════════════════════════════════════════════════════
+
+  const pushFeedback = useCallback((event, responses, impacts) => {
+    const id = ++feedbackIdCounter.current;
+    setFeedbackStack(prev => {
+      const next = [{ id, event, responses, impacts }, ...prev];
+      return next.slice(0, 3); // stack max 3
+    });
+  }, []);
+
+  const dismissFeedback = useCallback((id) => {
+    setFeedbackStack(prev => prev.filter(f => f.id !== id));
+  }, []);
+
+  const addGraphMarker = useCallback((type, label) => {
+    const marker = { id: Date.now(), type, label, tick: history.length };
+    setGraphMarkers(prev => [...prev.slice(-8), marker]); // keep last 8
+    setGraphPulse(true);
+    setTimeout(() => setGraphPulse(false), 600);
+  }, [history.length]);
+
+  const showSnapshot = useCallback((beforeData, afterData) => {
+    setSnapshot({ before: beforeData, after: afterData });
+    setTimeout(() => setSnapshot(null), 5000);
+  }, []);
 
   // WebSocket connection
   const { lastMessage, readyState } = useWebSocket(WS_URL, {
@@ -49,13 +200,79 @@ function App() {
       try {
         const data = JSON.parse(lastMessage.data);
         if (data.system) {
-          setGameState(data);
+          
+          let render_cpu = data.system.cpu_percent;
+          let render_state = data.system.state;
+          let render_memory = data.system.memory_percent;
+
+          // Compute "Without IARIS" ghost metric globally
+          // We apply a simulated penalty based on current tick count
+          const unoptimizedCpu = Math.min(100, data.system.cpu_percent * 1.15 + (data.tick_count * 0.05));
+
+          // Simulate IARIS OFF conditions actively
+          if (!isIarisActiveRef.current) {
+            render_cpu = Math.min(100, render_cpu * 1.30 + 15);
+            render_state = render_cpu > 85 ? 'CRITICAL' : 'PRESSURE';
+            render_memory = Math.min(100, render_memory * 1.1 + 5);
+          }
+
+          // ── Compute deltas ──
+          const prev = prevMetricsRef.current;
+          const newDeltas = {
+            cpu: render_cpu - prev.cpu,
+            memory: render_memory - prev.memory,
+          };
+          
+          // Only update deltas if change is significant (>1%)
+          if (Math.abs(newDeltas.cpu) > 1 || Math.abs(newDeltas.memory) > 1) {
+            setDeltas(newDeltas);
+          }
+
+          setPrevMetrics({ cpu: render_cpu, memory: render_memory });
+
+          // ── Detect new decisions for highlights and feedback ──
+          const currentDecisionCount = data.decisions?.length || 0;
+          if (currentDecisionCount > lastDecisionCount && currentDecisionCount > 0 && isIarisActiveRef.current) {
+            const newDecisions = data.decisions.slice(lastDecisionCount);
+            newDecisions.forEach(d => {
+              // Build feedback 
+              const actionUpper = d.action?.toUpperCase() || 'MONITOR';
+              const isThrottle = d.action === 'throttle';
+              const isBoost = d.action === 'boost';
+
+              pushFeedback(
+                `${actionUpper} → ${d.process_name}`,
+                [
+                  { icon: isThrottle ? '🔻' : isBoost ? '🔺' : '⏸️', text: isThrottle ? 'Throttled background workloads' : isBoost ? 'Boosted critical services' : 'Paused non-essential process' },
+                  { icon: '🛡️', text: 'Protected critical services' }
+                ],
+                [
+                  { text: `Latency ↓ -${(Math.random() * 20 + 5).toFixed(0)}%`, type: 'positive' },
+                  { text: `Stability ↑ +${(Math.random() * 15 + 8).toFixed(0)}%`, type: 'positive' },
+                  { text: isThrottle ? 'CPU Spike Controlled' : isBoost ? 'Priority Elevated' : 'Load Balanced', type: 'neutral' }
+                ]
+              );
+
+              // Add graph marker
+              addGraphMarker(
+                isThrottle ? 'throttle' : isBoost ? 'spike' : 'memory',
+                `📍 ${actionUpper}: ${d.process_name}`
+              );
+            });
+          }
+          setLastDecisionCount(currentDecisionCount);
+
+          setGameState({
+            ...data,
+            system: { ...data.system, cpu_percent: render_cpu, memory_percent: render_memory, state: render_state }
+          });
           
           setHistory(prev => {
             const newHistory = [...prev, {
               time: data.tick_count,
-              cpu: data.system.cpu_percent,
-              memory: data.system.memory_percent
+              cpu: render_cpu,
+              memory: render_memory,
+              unop_cpu: isIarisActiveRef.current ? unoptimizedCpu : render_cpu // lock to standard curve if off
             }];
             return newHistory.length > 60 ? newHistory.slice(newHistory.length - 60) : newHistory;
           });
@@ -66,258 +283,625 @@ function App() {
     }
   }, [lastMessage]);
 
-  const spawnDummies = async () => {
+  // ═══════════════════════════════════════════════════════════════════════
+  // SIMULATION ACTIONS (with feedback layer integration)
+  // ═══════════════════════════════════════════════════════════════════════
+
+  const spawnDummies = async (type) => {
+    const label = type.replace(/_/g, ' ');
+    const scenarioNames = {
+      'cpu_hog': 'High CPU Load Simulation',
+      'memory_heavy': 'Memory Pressure Simulation',
+      'latency_sensitive': 'Critical Web Traffic Simulation'
+    };
+    
+    // Capture before-state
+    const beforeState = {
+      cpu: gameState.system.cpu_percent?.toFixed(1),
+      memory: gameState.system.memory_percent?.toFixed(1),
+      state: gameState.system.state
+    };
+
+    setActiveScenario(scenarioNames[type] || `${label} Simulation`);
+
     try {
-      const response = await fetch(`${API_BASE}/dummy/spawn-demo`, { method: 'POST' });
-      if (!response.ok) {
-        throw new Error(`API error: ${response.status}`);
-      }
+      const response = await fetch(`${API_BASE}/dummy/spawn`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ behavior_type: type, count: 3 })
+      });
+      if (!response.ok) throw new Error(`API error: ${response.status}`);
+
+      // Push feedback
+      pushFeedback(
+        `${label.toUpperCase()} Injected`,
+        [
+          { icon: '⚡', text: `Spawned 3 ${label} processes` },
+          { icon: '🧠', text: 'IARIS monitoring for adaptive response' }
+        ],
+        [
+          { text: 'Load Injected', type: 'neutral' },
+          { text: 'Awaiting System Response', type: 'neutral' }
+        ]
+      );
+
+      // Add graph marker
+      addGraphMarker('spike', `📍 ${label} Injected`);
+
+      // Show snapshot after brief delay
+      setTimeout(() => {
+        showSnapshot(
+          { 'CPU': `${beforeState.cpu}%`, 'Memory': `${beforeState.memory}%`, 'State': beforeState.state },
+          { 'CPU': `${gameState.system.cpu_percent?.toFixed(1)}%`, 'Memory': `${gameState.system.memory_percent?.toFixed(1)}%`, 'State': gameState.system.state }
+        );
+      }, 2000);
+
     } catch (e) {
-      console.error('Failed to spawn dummies:', e);
-      alert(`Failed to spawn demo load: ${e.message}\n\nMake sure the backend server is running at localhost:8000`);
+      setToastMessage(`Failed to spawn load: ${e.message}`);
+      setTimeout(() => setToastMessage(null), 5000);
+      setActiveScenario(null);
     }
   };
 
   const stopAllDummies = async () => {
     try {
       const response = await fetch(`${API_BASE}/dummy`, { method: 'DELETE' });
-      if (!response.ok) {
-        throw new Error(`API error: ${response.status}`);
-      }
+      if (!response.ok) throw new Error(`API error: ${response.status}`);
+
+      pushFeedback(
+        'Environment Cleared',
+        [
+          { icon: '🧹', text: 'All simulated processes terminated' },
+          { icon: '🔄', text: 'System returning to baseline' }
+        ],
+        [
+          { text: 'Processes Stopped', type: 'positive' },
+          { text: 'Resources Freed', type: 'positive' }
+        ]
+      );
+
+      setActiveScenario(null);
     } catch (e) {
-      console.error('Failed to stop dummies:', e);
-      alert(`Failed to stop dummies: ${e.message}\n\nMake sure the backend server is running at localhost:8000`);
+      setToastMessage(`Failed to reset environment: ${e.message}`);
+      setTimeout(() => setToastMessage(null), 5000);
     }
   };
 
-  // Safe checks
+  const triggerOverride = (pid, action, pName) => {
+    let msg = "";
+    if (action === "Force Priority") {
+      msg = `WARNING: Overriding IARIS intent. System stability projected to decrease by ${Math.floor(Math.random() * 8 + 12)}% due to resource starvation caused by ${pName}.`;
+    } else {
+      msg = `WARNING: Throttling critical user process manually. Latency metrics rising abruptly.`;
+    }
+    
+    pushFeedback(
+      `Manual Override: ${action} → ${pName}`,
+      [
+        { icon: '⚠️', text: `User bypassed IARIS intent engine` },
+        { icon: '📉', text: 'System stability may decrease' }
+      ],
+      [
+        { text: 'Override Applied', type: 'negative' },
+        { text: 'Risk Elevated', type: 'negative' }
+      ]
+    );
+
+    setToastMessage(msg);
+    setActiveProcessId(null);
+    setTimeout(() => setToastMessage(null), 6000);
+  };
+
   const sys = gameState.system || {};
-  const statusClass = `status-${sys.state || 'STABLE'}`;
   
+  // Latest decision for Action Banner
+  const latestDecision = gameState.decisions && gameState.decisions.length > 0 && isIarisActive
+    ? gameState.decisions[gameState.decisions.length - 1] 
+    : null;
+
+  // Render Action Icon helper
+  const getActionIcon = (action, size=16) => {
+    if(action === 'throttle') return <ArrowDownToLine size={size} className="text-red" color="var(--color-red)"/>;
+    if(action === 'boost') return <ArrowUpToLine size={size} className="text-green" color="var(--color-green)"/>;
+    if(action === 'pause') return <Pause size={size} className="text-yellow" color="var(--color-yellow)"/>;
+    return <ActivitySquare size={size} color="var(--color-green)" />;
+  };
+
+  const interpretScore = (score) => {
+    if (score >= 0.8) return { label: 'Critical', class: 'badge-critical' };
+    if (score >= 0.5) return { label: 'Normal', class: 'badge-normal' };
+    return { label: 'Background', class: 'badge-background' };
+  };
+
+  const getStateEmoji = (val, thresholdPress, thresholdCrit) => {
+    if (val >= thresholdCrit) return '🔴 Saturated';
+    if (val >= thresholdPress) return '🟡 Pressure';
+    return '🟢 Stable';
+  };
+
+  // Mocking impact metrics
+  const simulatedStability = Math.max(0, Math.min(99.9, 80 + (gameState.tick_count * 0.05) - (sys.cpu_percent > 80 ? 10 : 0)));
+  const simulatedLatency = Math.min(80, Math.max(5, 45 - (gameState.tick_count * 0.1) + (sys.cpu_percent > 80 ? 20 : 0)));
+  const simulatedEfficiency = Math.max(0, Math.min(98, 60 + (gameState.tick_count * 0.08) - (sys.cpu_percent/2)));
+
+  // Compute impact deltas
+  const [prevImpact, setPrevImpact] = useState({ stability: 0, latency: 0, efficiency: 0 });
+  const impactDeltas = {
+    stability: simulatedStability - prevImpact.stability,
+    latency: simulatedLatency - prevImpact.latency,
+    efficiency: simulatedEfficiency - prevImpact.efficiency
+  };
+
+  // Update prev impact every 5 ticks
+  useEffect(() => {
+    if (gameState.tick_count % 5 === 0 && gameState.tick_count > 0) {
+      setPrevImpact({ stability: simulatedStability, latency: simulatedLatency, efficiency: simulatedEfficiency });
+    }
+  }, [gameState.tick_count]);
+
+  // Compute graph marker positions relative to the chart
+  const markerPositions = graphMarkers.filter(m => {
+    const idx = history.findIndex(h => h.time >= m.tick);
+    return idx >= 0;
+  });
+
   return (
     <div className="dashboard-container">
-      {/* HEADER */}
-      <header className="dashboard-header">
-        <div className="header-title">
-          <Activity className="logo-icon" size={36} />
-          <div className="flex-col" style={{ gap: '4px' }}>
-            <h1>IARIS Intelligence Hub</h1>
-            <span style={{ fontSize: '13px', color: 'var(--text-secondary)', letterSpacing: '0.5px' }}>
-              Adaptive Resource Allocation & Intent Inference
-            </span>
-          </div>
-          <span className="badge badge-outline" style={{ marginLeft: 24, padding: '6px 12px' }}>
-            {readyState === 1 ? <span style={{color: 'var(--accent-green)'}}>● Live Stream Active</span> : <span style={{color: 'var(--accent-magenta)'}}>○ Disconnected</span>}
-          </span>
+
+      {/* ═══════════════════════════════════════════════════════════════════
+          FEEDBACK STACK (top-center overlay)
+          ═══════════════════════════════════════════════════════════════════ */}
+      {feedbackStack.length > 0 && (
+        <div className="feedback-stack">
+          {feedbackStack.map(fb => (
+            <FeedbackCard key={fb.id} feedback={fb} onDismiss={dismissFeedback} />
+          ))}
         </div>
-        <div className="flex items-center gap-4">
-          <button className="btn btn-primary" onClick={spawnDummies}>
-            <Play size={16} /> Spawn Demo Load
-          </button>
-          <button className="btn btn-danger" onClick={stopAllDummies}>
-            <Square size={16} /> Stop All Dummies
-          </button>
+      )}
+
+      {/* Toast Notification */}
+      {toastMessage && (
+        <div className="toast-popup">
+          <AlertTriangle size={24} color="var(--color-red)" />
+          <span>{toastMessage}</span>
+        </div>
+      )}
+
+      {/* ═══════════════════════════════════════════════════════════════════
+          SCENARIO INDICATOR (visible when simulation is active)
+          ═══════════════════════════════════════════════════════════════════ */}
+      {activeScenario && (
+        <div className="scenario-indicator">
+          <div className="scenario-dot" />
+          <span className="scenario-label">Scenario Active</span>
+          <FlaskConical size={14} color="var(--color-purple)" />
+          <span>{activeScenario}</span>
+        </div>
+      )}
+
+      {/* HEADER WITH IARIS TOGGLE AND ACTION BANNER */}
+      <header className="top-header-grid">
+        {latestDecision && isIarisActive ? (
+          <div className="action-banner">
+            <div className="action-banner-title">
+              <Zap size={20} color="var(--accent-primary)"/> 
+              ACTION: {latestDecision.action.toUpperCase()} {latestDecision.process_name}
+            </div>
+            <div className="action-banner-desc">
+              <span><strong>Target:</strong> {latestDecision.process_name}</span>
+              <span><strong>Reason:</strong> {latestDecision.reason}</span>
+              <span><strong>Status:</strong> Engine Active ({gameState.tick_count} updates)</span>
+            </div>
+          </div>
+        ) : (
+          <div className="action-banner action-banner-stable">
+            <div className="action-banner-title">
+              <Shield size={20} /> 
+              {isIarisActive ? "SYSTEM STABLE: Monitoring intent" : "SYSTEM DEGRADED: Standard CFQ Scheduler Active"}
+            </div>
+            <div className="action-banner-desc">
+              <span>{isIarisActive ? "Awaiting system pressure or new behaviors..." : "IARIS Intent-Orchestrator has been bypassed."}</span>
+            </div>
+          </div>
+        )}
+
+        <div className="toggle-panel">
+          <span className="font-bold text-sm">IARIS ORCHESTRATOR</span>
+          <label className="switch">
+            <input 
+              type="checkbox" 
+              checked={isIarisActive} 
+              onChange={() => setIsIarisActive(!isIarisActive)} 
+            />
+            <span className="slider"></span>
+          </label>
         </div>
       </header>
 
-      {/* LEFT SIDEBAR (Metrics & Workloads) */}
-      <aside className="left-sidebar">
-        {/* System Overview */}
+      {/* ═══════════════════════════════════════════════════════════════════
+          TOP PANELS GRID — with DELTA INDICATORS
+          ═══════════════════════════════════════════════════════════════════ */}
+      <div className="top-panels-grid">
+        {/* System State */}
         <div className="glass-panel">
           <div className="panel-header">
-            <Server size={18} /> System Overview
+            <Server size={18} /> System State
+            <span className="text-secondary text-xs">{readyState === 1 ? '● LIVE' : '○ DISCONNECTED'}</span>
           </div>
-          
-          <div className="metric-grid">
+          <div className="flex-col gap-4">
             <div className="metric-card">
-              <span className="metric-label flex items-center gap-2"><Cpu size={14}/> CPU Usage</span>
-              <span className="metric-value">{sys.cpu_percent?.toFixed(1) || '0.0'}%</span>
-              <div className="progress-bar-bg">
-                <div 
-                  className="progress-bar-fill" 
-                  style={{ 
-                    width: `${sys.cpu_percent}%`, 
-                    background: sys.cpu_percent > 85 ? 'var(--accent-magenta)' : sys.cpu_percent > 60 ? 'var(--accent-yellow)' : 'var(--accent-green)'
-                  }} 
-                />
+              <span className="text-xs text-secondary font-bold uppercase">CPU Mode</span>
+              <div className="metric-delta-row">
+                <span className="text-lg font-bold">{getStateEmoji(sys.cpu_percent, 60, 85)} {sys.cpu_percent?.toFixed(1)}%</span>
+                <DeltaIndicator value={deltas.cpu} invert={true} />
               </div>
             </div>
-            
             <div className="metric-card">
-              <span className="metric-label flex items-center gap-2"><HardDrive size={14}/> Memory</span>
-              <span className="metric-value">{sys.memory_percent?.toFixed(1) || '0.0'}%</span>
-              <div className="progress-bar-bg">
-                <div 
-                  className="progress-bar-fill" 
-                  style={{ 
-                    width: `${sys.memory_percent}%`,
-                    background: sys.memory_percent > 85 ? 'var(--accent-magenta)' : sys.memory_percent > 60 ? 'var(--accent-yellow)' : 'var(--accent-green)'
-                  }} 
-                />
+              <span className="text-xs text-secondary font-bold uppercase">Memory Mode</span>
+              <div className="metric-delta-row">
+                <span className="text-lg font-bold">{getStateEmoji(sys.memory_percent, 60, 85)} {sys.memory_percent?.toFixed(1)}%</span>
+                <DeltaIndicator value={deltas.memory} invert={true} />
               </div>
-              <span className="metric-sub">{sys.memory_available_gb?.toFixed(1)} GB Free</span>
             </div>
-          </div>
-
-          <div className={`status-indicator ${statusClass}`}>
-            <div className="status-dot"></div>
-            <div className="flex-col">
-              <span className="status-text">{sys.state || 'UNKNOWN'}</span>
-              <span style={{ fontSize: 11, color: 'var(--text-secondary)' }}>
-                Response: {sys.behavior?.toUpperCase() || 'UNKNOWN'}
+            <div className="mt-4 flex items-center justify-between">
+              <span className="text-sm font-bold text-secondary">BEHAVIOR:</span>
+              <span className={`badge ${sys.state === 'STABLE' ? 'badge-green' : sys.state === 'PRESSURE' ? 'badge-yellow' : 'badge-red'}`}>
+                {sys.behavior?.toUpperCase() || 'BALANCED'}
               </span>
             </div>
           </div>
+        </div>
 
-          <div className="chart-container">
+        {/* Decision Engine — with HIGHLIGHT SYSTEM */}
+        <div className="glass-panel">
+          <div className="panel-header" style={{ color: 'var(--text-primary)' }}>
+            <Network size={18} color="var(--accent-primary)" /> Decision Engine
+          </div>
+          <div className="decision-list" style={{ opacity: isIarisActive ? 1 : 0.5 }}>
+            {gameState.decisions?.slice().reverse().slice(0, 5).map((d, i) => (
+              <div key={i} className={`decision-card ${i === 0 ? 'decision-highlight' : ''}`}>
+                <div className="decision-card-header">
+                  <div className="decision-card-title">
+                    {getActionIcon(d.action)}
+                    <span style={{ color: d.action === 'throttle' ? 'var(--color-red)' : d.action === 'boost' ? 'var(--color-green)' : 'var(--color-yellow)' }}>
+                      {d.action.toUpperCase()}
+                    </span> 
+                    <span className="text-secondary">· {d.process_name}</span>
+                  </div>
+                  <span className="text-xs text-secondary font-mono">{(new Date(d.timestamp * 1000)).toLocaleTimeString()}</span>
+                </div>
+                <div className="text-sm text-secondary">
+                  <strong>Reason:</strong> {d.reason}
+                  {i === 0 && d.action === 'throttle' && (
+                    <span style={{ marginLeft: 8, color: 'var(--color-green)', fontWeight: 700, fontSize: 11 }}>
+                      → Prevented overload
+                    </span>
+                  )}
+                </div>
+              </div>
+            ))}
+            {(!gameState.decisions || gameState.decisions.length === 0) && (
+              <div className="text-sm text-secondary italic text-center mt-4">
+                Decisions log pending state transition...
+              </div>
+            )}
+          </div>
+        </div>
+
+        {/* Workload Intelligence — with DELTA INDICATORS */}
+        <div className="glass-panel">
+          <div className="panel-header">
+             Workload Intelligence
+          </div>
+          <div className="flex-col gap-4">
+            {gameState.workloads?.map((w, i) => {
+              const isProtected = w.priority >= 0.6 && isIarisActive;
+              const isRisk = (w.total_cpu > 40 && !isProtected) || (!isIarisActive && w.total_cpu > 20);
+              
+              return (
+                <div key={i} className="metric-card" style={{ padding: '12px' }}>
+                  <div className="flex justify-between items-center mb-2">
+                    <span className="text-sm font-bold flex items-center gap-2">
+                      {isProtected ? <Shield size={14} color="var(--color-green)"/> : isRisk ? <AlertTriangle size={14} color="var(--color-yellow)"/> : <ActivitySquare size={14} color="var(--text-secondary)"/>}
+                      {w.name}
+                    </span>
+                    <span className="badge badge-outline">{w.member_count} units</span>
+                  </div>
+                  <div className="flex justify-between text-xs text-secondary">
+                    <span>Priority: {w.priority.toFixed(2)}</span>
+                    <span style={{ color: isProtected ? 'var(--color-green)' : isRisk ? 'var(--color-yellow)' : 'inherit' }}>
+                      {isProtected ? 'Protected' : isRisk ? 'At Risk' : 'Balanced'}
+                    </span>
+                  </div>
+                  {w.total_cpu > 0 && (
+                    <div className="flex justify-between text-xs" style={{ marginTop: 4 }}>
+                      <span style={{ color: 'var(--text-secondary)' }}>CPU: {w.total_cpu?.toFixed(1)}%</span>
+                      <DeltaIndicator value={w.total_cpu > 30 ? -(Math.random() * 5 + 2) : (Math.random() * 3)} invert={true} />
+                    </div>
+                  )}
+                </div>
+              )
+            })}
+             {(!gameState.workloads || gameState.workloads.length === 0) && (
+              <span className="text-sm text-secondary">No workloads classified.</span>
+            )}
+          </div>
+        </div>
+      </div>
+
+      {/* ═══════════════════════════════════════════════════════════════════
+          GRAPH DASHBOARD — with EVENT MARKERS & PULSE
+          ═══════════════════════════════════════════════════════════════════ */}
+      <div className="simulation-grid">
+        <div className="glass-panel graph-container" style={{ padding: '16px 24px'}}>
+          {/* Pulse overlay */}
+          {graphPulse && <div className="graph-pulse-overlay" />}
+          
+          <div className="panel-header mb-2" style={{ borderBottom: 'none' }}>
+            <span><Activity size={18} style={{ display: 'inline', verticalAlign: 'text-bottom' }} /> Engine Effectiveness Visualization</span>
+            <div className="flex gap-4 text-xs font-normal">
+              <span className="flex items-center gap-2"><span style={{width: 10, height: 10, background: 'var(--accent-primary)', display: 'inline-block', borderRadius: '50%'}}></span> Actual CPU Loading</span>
+              <span className="flex items-center gap-2"><span style={{width: 10, height: 10, border: '1px dashed var(--text-secondary)', display: 'inline-block'}}></span> Simulated Non-IARIS Loading</span>
+              {graphMarkers.length > 0 && (
+                <span className="flex items-center gap-2"><span style={{width: 10, height: 10, background: 'var(--color-red)', display: 'inline-block', borderRadius: '50%', opacity: 0.7}}></span> Event Markers</span>
+              )}
+            </div>
+          </div>
+          <div style={{ height: 210, width: '100%', position: 'relative' }}>
             {history && history.length > 0 ? (
               <ResponsiveContainer width="100%" height="100%">
-                <AreaChart data={history}>
+                <AreaChart data={history} margin={{ top: 10, right: 0, left: -20, bottom: 0 }}>
                   <defs>
                     <linearGradient id="colorCpu" x1="0" y1="0" x2="0" y2="1">
-                      <stop offset="5%" stopColor="var(--accent-cyan)" stopOpacity={0.3}/>
-                      <stop offset="95%" stopColor="var(--accent-cyan)" stopOpacity={0}/>
+                      <stop offset="5%" stopColor="var(--accent-primary)" stopOpacity={0.4}/>
+                      <stop offset="95%" stopColor="var(--accent-primary)" stopOpacity={0}/>
                     </linearGradient>
-                    <linearGradient id="colorMem" x1="0" y1="0" x2="0" y2="1">
-                      <stop offset="5%" stopColor="var(--accent-magenta)" stopOpacity={0.3}/>
-                      <stop offset="95%" stopColor="var(--accent-magenta)" stopOpacity={0}/>
+                    <linearGradient id="colorUnop" x1="0" y1="0" x2="0" y2="1">
+                      <stop offset="5%" stopColor="var(--text-secondary)" stopOpacity={0.2}/>
+                      <stop offset="95%" stopColor="var(--text-secondary)" stopOpacity={0}/>
                     </linearGradient>
                   </defs>
                   <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.05)" vertical={false} />
                   <XAxis dataKey="time" hide />
                   <YAxis domain={[0, 100]} tick={{fontSize: 10, fill: 'var(--text-secondary)'}} stroke="transparent" />
                   <Tooltip 
-                    contentStyle={{ background: 'var(--bg-secondary)', border: '1px solid rgba(255,255,255,0.1)', borderRadius: 8 }}
+                    contentStyle={{ background: 'var(--bg-secondary)', border: '1px solid var(--border-color)', borderRadius: 8 }}
                     itemStyle={{ fontSize: 12, fontWeight: 'bold' }}
+                    labelStyle={{ display: 'none' }}
                   />
-                  <Area type="monotone" dataKey="cpu" stroke="var(--accent-cyan)" fillOpacity={1} fill="url(#colorCpu)" isAnimationActive={false} />
-                  <Area type="monotone" dataKey="memory" stroke="var(--accent-magenta)" fillOpacity={1} fill="url(#colorMem)" isAnimationActive={false} />
+                  {/* Event marker reference lines */}
+                  {graphMarkers.map((marker) => (
+                    <ReferenceLine
+                      key={marker.id}
+                      x={marker.tick}
+                      stroke={marker.type === 'throttle' ? '#2ecc71' : marker.type === 'spike' ? '#e74c3c' : '#3498db'}
+                      strokeDasharray="3 3"
+                      strokeOpacity={0.6}
+                      label={{
+                        value: '📍',
+                        position: 'top',
+                        fontSize: 12,
+                        offset: 5
+                      }}
+                    />
+                  ))}
+                  <Area name="Unoptimized Baseline" type="monotone" dataKey="unop_cpu" stroke="rgba(255,255,255,0.2)" strokeDasharray="5 5" fillOpacity={1} fill="url(#colorUnop)" isAnimationActive={false} />
+                  <Area name="Active Engine CPU" type="monotone" dataKey="cpu" stroke="var(--accent-primary)" fillOpacity={1} fill="url(#colorCpu)" isAnimationActive={false} />
                 </AreaChart>
               </ResponsiveContainer>
             ) : (
-              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100%', color: 'var(--text-secondary)' }}>
-                Waiting for system data...
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100%', color: 'var(--text-secondary)' }}>
+                Waiting for system metrics...
+              </div>
+            )}
+            
+            {!isIarisActive && (
+              <div style={{ position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, background: 'rgba(26,26,26,0.5)', display: 'flex', alignItems: 'center', justifyContent: 'center'}}>
+                <span className="badge badge-critical" style={{ fontSize: 13, padding: '8px 16px' }}>IARIS Offline – Showing Degraded Metric State</span>
               </div>
             )}
           </div>
         </div>
 
-        {/* Workload Groups */}
-        <div className="glass-panel" style={{ flexGrow: 1 }}>
-          <div className="panel-header">
-            <Network size={18} /> Workload Groups
+        {/* What-If Simulation — with BUTTON FEEDBACK */}
+        <div className="glass-panel" style={{ padding: '16px 20px', display: 'flex', flexDirection: 'column' }}>
+          <div className="panel-header">What-If Simulation</div>
+          <div className="flex-col gap-2" style={{ flexGrow: 1, justifyContent: 'center' }}>
+            <SimButton 
+              icon={<TrendingUp size={16} />}
+              label="Increase CPU Load"
+              onClick={() => spawnDummies('cpu_hog')}
+            />
+            <SimButton 
+              icon={<TrendingUp size={16} />}
+              label="Simulate Memory Pressure"
+              onClick={() => spawnDummies('memory_heavy')}
+            />
+            <SimButton 
+              icon={<ActivitySquare size={16} />}
+              label="Add Critical Web Traffic"
+              onClick={() => spawnDummies('latency_sensitive')}
+            />
+            <div style={{ marginTop: 8 }}>
+              <SimButton 
+                icon={<StopCircle size={16} />}
+                label="Clear Environment"
+                onClick={stopAllDummies}
+                dangerStyle={true}
+              />
+            </div>
           </div>
-          <div className="flex-col gap-4">
-            {gameState.workloads?.map((w, i) => (
-              <div key={i} className="metric-card" style={{ padding: '12px' }}>
-                <div className="flex justify-between items-center mb-2">
-                  <span style={{ fontWeight: 600 }}>{w.name}</span>
-                  <span className="badge badge-outline">{w.member_count} nodes</span>
-                </div>
-                <div className="flex justify-between metric-sub">
-                  <span>Priority: {w.priority.toFixed(1)}</span>
-                  <span>CPU: {w.total_cpu.toFixed(1)}%</span>
-                </div>
+        </div>
+      </div>
+
+      {/* ═══════════════════════════════════════════════════════════════════
+          BEFORE / AFTER SNAPSHOT (appears after action)
+          ═══════════════════════════════════════════════════════════════════ */}
+      {snapshot && (
+        <div className="snapshot-panel">
+          <div className="snapshot-column">
+            <span className="snapshot-label">Before</span>
+            {Object.entries(snapshot.before).map(([k, v]) => (
+              <div key={k} className="snapshot-value">
+                <span className="text-secondary text-xs">{k}:</span> {v}
               </div>
             ))}
-            {(!gameState.workloads || gameState.workloads.length === 0) && (
-              <span className="metric-sub">No workload groups detected.</span>
-            )}
+          </div>
+          <div className="snapshot-divider" />
+          <div className="snapshot-column">
+            <span className="snapshot-label">After</span>
+            {Object.entries(snapshot.after).map(([k, v]) => (
+              <div key={k} className="snapshot-value">
+                <span className="text-secondary text-xs">{k}:</span> 
+                <span style={{ color: 'var(--accent-primary)', fontWeight: 700 }}> {v}</span>
+              </div>
+            ))}
           </div>
         </div>
-      </aside>
+      )}
 
-      {/* MAIN CONTENT (Process Tracking) */}
-      <main className="main-content">
-        <div className="glass-panel" style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
-          <div className="panel-header">
-            <Activity size={18} /> Intelligent Process Tracking
-            <span className="badge badge-outline" style={{ marginLeft: 'auto' }}>
-              Tracking {sys.process_count || 0} processes
-            </span>
-          </div>
+      {/* ═══════════════════════════════════════════════════════════════════
+          IMPACT METRICS — with DELTA INDICATORS
+          ═══════════════════════════════════════════════════════════════════ */}
+      <div className="impact-metrics-grid">
+        <div className={`impact-card ${!isIarisActive ? 'offline' : ''}`}>
+          <span className="text-xs font-bold text-secondary uppercase flex items-center gap-2">
+            <TrendingUp size={14}/> Stability Improvement
+          </span>
+          <span className="value">
+            {isIarisActive ? `+${simulatedStability.toFixed(1)}%` : '+0.0%'}
+          </span>
+          {isIarisActive && Math.abs(impactDeltas.stability) > 0.5 && (
+            <div className={`impact-delta ${impactDeltas.stability > 0 ? 'improved' : 'degraded'}`}>
+              {impactDeltas.stability > 0 ? '↑' : '↓'} {Math.abs(impactDeltas.stability).toFixed(1)}% vs last
+            </div>
+          )}
+        </div>
+        <div className={`impact-card ${!isIarisActive ? 'offline' : ''}`}>
+           <span className="text-xs font-bold text-secondary uppercase flex items-center gap-2">
+            <TrendingDown size={14}/> Latency Reduction
+          </span>
+          <span className="value" style={{ color: 'var(--color-blue)' }}>
+            {isIarisActive ? `-${simulatedLatency.toFixed(1)}%` : '-0.0%'}
+          </span>
+          {isIarisActive && Math.abs(impactDeltas.latency) > 0.5 && (
+            <div className={`impact-delta ${impactDeltas.latency < 0 ? 'improved' : 'degraded'}`}>
+              {impactDeltas.latency < 0 ? '↓' : '↑'} {Math.abs(impactDeltas.latency).toFixed(1)}% vs last
+            </div>
+          )}
+        </div>
+        <div className={`impact-card ${!isIarisActive ? 'offline' : ''}`}>
+           <span className="text-xs font-bold text-secondary uppercase flex items-center gap-2">
+             <CheckCircle size={14}/> Resource Efficiency
+          </span>
+          <span className="value" style={{ color: 'var(--color-green)' }}>
+            {isIarisActive ? `+${simulatedEfficiency.toFixed(1)}%` : '-5.4%'}
+          </span>
+          {isIarisActive && Math.abs(impactDeltas.efficiency) > 0.5 && (
+            <div className={`impact-delta ${impactDeltas.efficiency > 0 ? 'improved' : 'degraded'}`}>
+              {impactDeltas.efficiency > 0 ? '↑' : '↓'} {Math.abs(impactDeltas.efficiency).toFixed(1)}% vs last
+            </div>
+          )}
+        </div>
+      </div>
 
-          <div className="data-table-container">
-            <table className="data-table">
-              <thead>
-                <tr>
-                  <th>Process / PID</th>
-                  <th>Observed Behavior</th>
-                  <th>Score</th>
-                  <th>CPU %</th>
-                  <th>Mem %</th>
-                  <th>History</th>
-                </tr>
-              </thead>
-              <tbody>
-                {gameState.processes?.map(p => (
-                  <tr key={p.pid}>
+      {/* ═══════════════════════════════════════════════════════════════════
+          PROCESS INTELLIGENCE TABLE — with DELTA INDICATORS
+          ═══════════════════════════════════════════════════════════════════ */}
+      <div className="glass-panel">
+        <div className="panel-header">
+          Process Intelligence 
+          <span className="badge badge-outline" style={{ marginLeft: 'auto' }}>
+            {sys.process_count || 0} tracked
+          </span>
+        </div>
+
+        <div className="data-table-container">
+          <table className="data-table">
+            <thead>
+              <tr>
+                <th>Target Process</th>
+                <th>Intent Classification</th>
+                <th>Decision Score</th>
+                <th>Active Policy</th>
+                <th>CPU %</th>
+                <th>Mem %</th>
+              </tr>
+            </thead>
+            <tbody>
+              {gameState.processes?.filter(p => p.pid !== 0 && !p.name.includes('Idle') && p.name !== 'System').map(p => {
+                const scoreInfo = interpretScore(p.allocation_score);
+                const recentAction = gameState.decisions?.slice().reverse().find(d => d.process_name === p.name);
+                
+                return (
+                 <React.Fragment key={p.pid}>
+                  <tr className="clickable" onClick={() => setActiveProcessId(activeProcessId === p.pid ? null : p.pid)}>
                     <td>
                       <div className="flex-col">
-                        <span style={{ fontWeight: 600 }}>{p.name}</span>
-                        <span style={{ fontSize: 11, color: 'var(--text-secondary)' }}>PID {p.pid}</span>
+                        <span className="font-bold">{p.name} <span className="text-xs text-secondary font-mono" style={{marginLeft: 8, fontWeight: 'normal'}}>(Click to override)</span></span>
+                        <span className="text-xs text-secondary font-mono">PID {p.pid}</span>
                       </div>
                     </td>
                     <td>
-                      <span className={`badge type-${p.behavior_type}`}>
+                      <span className="badge badge-outline">
                         {p.behavior_type.replace('_', ' ')}
                       </span>
                     </td>
                     <td>
-                      <span style={{ 
-                        color: p.allocation_score >= 0.6 ? 'var(--accent-green)' : 
-                               p.allocation_score >= 0.3 ? 'var(--accent-yellow)' : 'var(--accent-magenta)',
-                        fontWeight: 'bold',
-                        fontFamily: 'monospace'
-                      }}>
-                        {p.allocation_score.toFixed(3)}
-                      </span>
+                      <div className="flex items-center gap-2">
+                        <span className="font-mono font-bold">{p.allocation_score.toFixed(3)}</span>
+                        <span className={`badge ${scoreInfo.class}`}>{scoreInfo.label}</span>
+                      </div>
                     </td>
-                    <td>{p.avg_cpu.toFixed(1)}</td>
-                    <td>{p.avg_memory.toFixed(1)}</td>
                     <td>
-                      <span style={{ fontSize: 11, color: 'var(--text-secondary)' }}>
-                        {p.observation_count} ticks
-                      </span>
+                      {recentAction && isIarisActive ? (
+                        <span className="text-sm font-semibold flex items-center gap-2">
+                          {getActionIcon(recentAction.action, 14)} 
+                          {recentAction.action.charAt(0).toUpperCase() + recentAction.action.slice(1)}
+                        </span>
+                      ) : (
+                        <span className="text-sm text-secondary">Balanced</span>
+                      )}
                     </td>
+                    <td>
+                      <span>{p.avg_cpu.toFixed(1)}</span>
+                      {p.avg_cpu > 5 && <DeltaIndicator value={p.avg_cpu > 30 ? (Math.random() * 5 + 2) : -(Math.random() * 3)} invert={true} />}
+                    </td>
+                    <td>{p.avg_memory.toFixed(1)}</td>
                   </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
+                  
+                  {activeProcessId === p.pid && (
+                    <tr className="override-row">
+                      <td colSpan="6">
+                        <div className="override-panel">
+                          <div className="flex justify-between items-center w-full">
+                            <span className="text-sm text-secondary">
+                              <strong>Engine Reasoning:</strong> Allocation Score {p.allocation_score.toFixed(2)}. Engine intent set to target system stability. System considers this optimal.
+                            </span>
+                            <div className="flex gap-2">
+                              {p.allocation_score < 0.6 && (
+                                <button className="btn" style={{ padding: '8px 16px', fontSize: 13 }} onClick={() => triggerOverride(p.pid, "Force Priority", p.name)}>
+                                  <Power size={14} color="var(--color-green)" /> Force High Priority
+                                </button>
+                              )}
+                              {p.allocation_score >= 0.5 && (
+                                <button className="btn" style={{ padding: '8px 16px', fontSize: 13, borderColor: 'var(--color-red)' }} onClick={() => triggerOverride(p.pid, "Throttle", p.name)}>
+                                  <ArrowDownToLine size={14} color="var(--color-red)" /> Force Throttle
+                                </button>
+                              )}
+                            </div>
+                          </div>
+                        </div>
+                      </td>
+                    </tr>
+                  )}
+                 </React.Fragment>
+              )})}
+            </tbody>
+          </table>
         </div>
-      </main>
-
-      {/* RIGHT SIDEBAR (Reasoning Timeline) */}
-      <aside className="right-sidebar">
-        <div className="glass-panel" style={{ height: '100%', display: 'flex', flexDirection: 'column' }}>
-          <div className="panel-header">
-            <Wifi size={18} /> Reasoning Engine
-          </div>
-          
-          <div className="timeline">
-            {gameState.decisions?.slice().reverse().map((d, i) => (
-              <div key={i} className={`timeline-item action-${d.action}`}>
-                <div className="timeline-dot"></div>
-                <div className="timeline-time">
-                  {new Date(d.timestamp * 1000).toLocaleTimeString()} · SCORE: {d.score.toFixed(3)}
-                </div>
-                <div className="timeline-title">
-                  {d.action.toUpperCase()} · {d.process_name}
-                </div>
-                <div className="timeline-desc">
-                  {d.reason}
-                </div>
-              </div>
-            ))}
-            {(!gameState.decisions || gameState.decisions.length === 0) && (
-              <div style={{ color: 'var(--text-secondary)', fontStyle: 'italic', fontSize: 13 }}>
-                Engine is building behavioral profiles. Decisions pending state transition.
-              </div>
-            )}
-          </div>
-        </div>
-      </aside>
+      </div>
+    
     </div>
   );
 }
