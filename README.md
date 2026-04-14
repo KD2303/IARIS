@@ -62,7 +62,14 @@ The core is an asynchronous Python daemon tuned for zero-blocking performance.
 ### Frontend Dashboard
 For detailed visual telemetry, IARIS ships with a custom dashboard.
 * **Stack:** React & Vite (`/frontend`).
-* **Features:** Live data streaming, historical footprint charts, real-time cache analytics, and convergence status tracking.
+* **Features:** Live data streaming, multi-panel visualization charts, real-time cache analytics, and convergence status tracking.
+* **Current UI Layout:** Five operational tabs:
+  * `VISUALIZATION`
+  * `RESULTS AND SIMULATION`
+  * `KEY INSIGHTS`
+  * `IMPACT ANALISIS` (UI label)
+  * `KNOWLEDGE BASE`
+* **Desktop Runtime:** Electron desktop shell with integrated startup loading window and backend health polling.
 
 ---
 
@@ -72,12 +79,15 @@ For detailed visual telemetry, IARIS ships with a custom dashboard.
 * Python 3.11+
 * Node.js 18+ (For the frontend UI)
 
-### 1. Install the Core Daemon
-Clone the repository and install the backend engine in editable mode:
+### 1. Install the Core Backend
+Clone the repository and install the backend engine in a virtual environment:
 
 ```bash
 git clone https://github.com/your-org/iaris.git
 cd iaris
+python -m venv venv
+# Windows PowerShell:
+.\venv\Scripts\Activate.ps1
 pip install -e .
 ```
 
@@ -93,26 +103,78 @@ npm install
 
 ## 🎮 Usage Guide
 
-IARIS provides a unified CLI tool for all heavy lifting.
+IARIS supports three active run modes: backend API, web dashboard, and Electron desktop app.
 
-### Starting the Background Engine
-To start the adaptive engine and local API server:
+### A) Start Backend API (FastAPI + WebSocket)
+
+Start the adaptive engine API server:
+
 ```bash
-iaris start
+iaris serve
 ```
-*(By default, this will spin up the FastAPI endpoints to stream metrics and initialize the Three-Hurdle framework.)*
+
+Default endpoints:
+* API root: `http://127.0.0.1:8000`
+* API docs: `http://127.0.0.1:8000/docs`
+* WebSocket stream: `ws://127.0.0.1:8000/ws`
+
+### B) Start Web Dashboard (React/Vite)
+
+In a separate terminal:
+
+```bash
+cd frontend
+npm run dev
+```
+
+### C) Start Desktop App (Electron)
+
+Launch the packaged desktop shell (builds frontend, opens Electron, and connects to backend):
+
+```bash
+cd frontend
+npm run electron:dev
+```
+
+Note:
+* The desktop process attempts to start the backend automatically on `127.0.0.1:8000`.
+* If a backend instance is already running on `127.0.0.1:8000`, Electron will connect to that instance.
 
 ### Launching the Terminal Interface (TUI)
 To monitor processes, cache hit rates, and EWMA logic visually from your terminal:
 ```bash
-iaris tui
+iaris dashboard
 ```
 
-### Launching the Dashboard (Web UI)
-In a separate terminal, spin up the React development server:
+### Additional CLI Commands
+
 ```bash
+iaris demo
+iaris status
+iaris spawn cpu_hog --count 3
+```
+
+---
+
+## ✅ Current Project Status
+
+Implemented and active:
+* Three-Hurdle backend framework (similarity, cache/delta, EWMA continuity).
+* FastAPI + WebSocket telemetry pipeline.
+* Multi-tab React analytics interface with simulation and insights workflows.
+* Impact analysis and knowledge-base panels.
+* Electron desktop integration with startup loading window + backend readiness polling.
+
+Primary local development workflow:
+
+```bash
+# Terminal 1
+.\venv\Scripts\Activate.ps1
+iaris serve
+
+# Terminal 2
 cd frontend
-npm run dev
+npm run electron:dev
 ```
 
 ---
