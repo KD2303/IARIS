@@ -1,247 +1,368 @@
-﻿<div align="center">
+<div align="center">
 
 # IARIS
-**Intent-Aware Adaptive Resource Intelligence System**
 
-[![Python 3.11+](https://img.shields.io/badge/python-3.11+-blue.svg)](https://www.python.org/downloads/)
-[![FastAPI](https://img.shields.io/badge/FastAPI-0.100.0+-green.svg)](https://fastapi.tiangolo.com/)
-[![React](https://img.shields.io/badge/React-Frontend-blue.svg)](https://react.dev/)
-[![Version](https://img.shields.io/badge/version-1.0.0-success.svg)]()
+### **Intent-Aware Adaptive Resource Intelligence System**
 
-_A zero-configuration, intent-aware system for adaptive resource management and continuous learning._
+[![Python](https://img.shields.io/badge/Python-Backend-blue.svg)]()
+[![FastAPI](https://img.shields.io/badge/FastAPI-API-green.svg)]()
+[![React](https://img.shields.io/badge/React-Frontend-blue.svg)]()
+[![Desktop](https://img.shields.io/badge/Desktop-App-orange.svg)]()
+[![Version](https://img.shields.io/badge/version-2.0-success.svg)]()
+
+*An intent-aware system that learns, predicts, and optimizes system resource usage in real time.*
 
 </div>
 
+---
+
 ## 🌟 Overview
 
-**IARIS** (Intent-Aware Adaptive Resource Intelligence System) is a comprehensive, high-performance solution for dynamic, workload-aware resource allocation. Standard operating systems allocate resources blindly; IARIS observes process behavior, learns performance characteristics, and adapts system resources automatically in real-time.
+**IARIS** (Intent-Aware Adaptive Resource Intelligence System) is a **desktop-based adaptive resource optimization system** that observes process behavior, learns patterns, and improves system efficiency in real time.
 
-Historically, adaptive resource systems have failed to attain production viability due to three massive constraints: the **Cold Start Problem**, the **Overhead Problem**, and the **Learning Delay Problem**. IARIS is fundamentally built around a **Three-Hurdle Solution Framework** that directly resolves these issues, making real-time, AI-driven process administration practical.
+It is designed to make the computer feel **faster, smarter, and more responsive** — without requiring the user to manually manage resources.
 
----
-
-## 🚀 The Three-Hurdle Solution Framework
-
-IARIS's core engine solves the triad of constraints dragging down legacy performance balancers:
-
-### 1. 🥶 The Cold Start Problem → Solved via Similarity Matching Engine
-**The Problem:** When a new process starts, the system has no historical behavior data, forcing it to fall back on blind, default allocation.
-**The IARIS Solution (`iaris/similarity.py`):**
-* As new processes spawn, IARIS extracts a lightweight **Signature Vector** (process name, memory footprint, burstiness, blocking behavior).
-* The **Similarity Matcher** computes multi-dimensional weighted similarity scores against historically learned workloads.
-* New processes are reliably bootstrapped with learned profiles, yielding **~80-85% initial accuracy** before formal learning even begins.
-
-### 2. ⚡ The Overhead Problem → Solved via Optimization Pipeline
-**The Problem:** Monitoring every process and continuously recomputing resource scores leads to catastrophic CPU overhead (up to 30% for 1000 processes).
-**The IARIS Solution (`iaris/cache.py`):**
-* Implementation of a highly aggressive caching pipeline utilizing **Delta Computations**.
-* Rather than recalculating on every tick, IARIS tracks incremental shifts. If a process's behavior hasn't significantly drifted beyond established thresholds (e.g., `cpu_delta_threshold`, `io_delta_threshold`), it skips re-evaluation.
-* Achieves a **~95% cache hit rate**, dropping monitoring CPU overhead by **~97%** *(1000 processes cost ~1% CPU instead of ~30%)*.
-
-### 3. 🐌 The Learning Delay Problem → Solved via EWMA Continuity Engine
-**The Problem:** Traditional heuristic or ML learning models take minutes to adapt to behavioral shifts, making the system react too slowly to be useful.
-**The IARIS Solution (`iaris/continuity.py`):**
-* IARIS ditches delayed batches in favor of an **Exponentially Weighted Moving Average (EWMA)** continuity engine that never resets.
-* Learning moves fluidly through three phases: 
-  * **Bootstrap (0-10s):** Fast learning (Alpha = 0.5) combining signature data.
-  * **Adaptation (10-90s):** Gradual calibration (Alpha = 0.3 to 0.1).
-  * **Stable (>90s):** Continuous background refinement (Alpha = 0.1).
-* Built-in spike detection smooths out anomalies, while velocity constraints prevent jerky updates. Convergence is achieved **3-10x faster** (in exactly 30-90 seconds).
+Unlike traditional tools, IARIS does not just show system activity — it **understands behavior, predicts needs, and adapts decisions accordingly**.
 
 ---
 
-## 🏗️ System Architecture & Stack
+## 🎯 What IARIS Solves
 
-### Backend / Core Engine
-The core is an asynchronous Python daemon tuned for zero-blocking performance.
-* **Engine Core:** Written in Python (`psutil` for robust platform-agnostic metrics).
-* **API/WebSockets:** Exposes real-time behavior and allocation scores via `FastAPI` and `websockets`.
-* **Behavior Classifier:** Dynamically tags processes into workload buckets (e.g., intensive-computation, idle-watcher, io-heavy).
-* **CLI & TUI:** Implements a rich Terminal User Interface dashboard using `Textual` and operations via `Typer`.
+Modern operating systems and resource tools:
 
-### Frontend Dashboard
-For detailed visual telemetry, IARIS ships with a custom dashboard.
-* **Stack:** React & Vite (`/frontend`).
-* **Features:** Live data streaming, multi-panel visualization charts, real-time cache analytics, and convergence status tracking.
-* **Current UI Layout:** Five operational tabs:
-  * `VISUALIZATION`
-  * `RESULTS AND SIMULATION`
-  * `KEY INSIGHTS`
-  * `IMPACT ANALISIS` (UI label)
-  * `KNOWLEDGE BASE`
-* **Desktop Runtime:** Electron desktop shell with integrated startup loading window and backend health polling.
+* Treat applications generically
+* React instead of anticipate
+* Do not explain *why* performance changes
 
----
+### IARIS solves this by:
 
-## 📦 Installation & Setup
+* Observing process behavior
+* Learning usage patterns
+* Predicting future needs
+* Adapting resource decisions
 
-**Prerequisites:** 
-* Python 3.11+
-* Node.js 18+ (For the frontend UI)
+### 🔍 Key Problem Areas
 
-### 1. Install the Core Backend
-Clone the repository and install the backend engine in a virtual environment:
-
-```bash
-git clone https://github.com/your-org/iaris.git
-cd iaris
-python -m venv venv
-# Windows PowerShell:
-.\venv\Scripts\Activate.ps1
-pip install -e .
-```
-
-### 2. Install the Frontend
-Move into the frontend workspace and install dependencies:
-
-```bash
-cd frontend
-npm install
-```
+* ❄️ **Cold Start Problem** — new processes have no history
+* ⚡ **Overhead Problem** — constant monitoring wastes CPU
+* 🐌 **Learning Delay Problem** — slow adaptation reduces usefulness
+* 👁️ **Lack of Visibility** — users cannot see *why* performance changed
+* 🔁 **Poor Feedback Loop** — users cannot safely test changes
 
 ---
 
-## 📦 Building a Standalone Executable
+## 🧠 Core Idea
 
-Want to run IARIS as a single Windows executable without installing Python or Node.js separately? Follow these steps to build a complete standalone application.
+> IARIS is **not a scheduler replacement** — it is a **behavior-aware optimization layer**.
 
-### Quick Start
+### Simple Meaning
 
-From the project root:
+* The OS handles execution
+* IARIS observes behavior
+* IARIS learns patterns
+* IARIS improves decisions
 
-**Option 1: Batch File (Easiest)**
-```batch
-build_exe.bat
-```
-
-**Option 2: PowerShell**
-```powershell
-.\build_exe.ps1
-```
-
-**Option 3: Python**
-```bash
-python build_exe.py
-```
-
-### What You Get
-
-A complete, self-contained Windows installer that bundles:
-- ✅ React frontend (Electron app)
-- ✅ Python backend (FastAPI server)
-- ✅ All dependencies (psutil, uvicorn, textual, etc.)
-- ✅ Desktop shortcuts and Start Menu entry
-
-**Output:** `frontend\dist-electron\IARIS Setup 1.0.0.exe` (~150-200 MB)
-
-### Detailed Build Guide
-
-For comprehensive instructions, prerequisites, troubleshooting, and customization options, see:
-- **[BUILD_EXE_GUIDE.md](BUILD_EXE_GUIDE.md)** — Full documentation
-- **[BUILD_QUICK_REFERENCE.md](BUILD_QUICK_REFERENCE.md)** — Quick reference card
-
-### Validate Your Setup First
-
-Before building, verify your environment:
-
-```bash
-python build_diagnostics.py
-```
-
-This checks Python version, Node.js, dependencies, disk space, and ports.
+Instead of blindly treating all processes equally, IARIS tries to understand **intent and behavior**.
 
 ---
 
-## 🎮 Usage Guide
+## 🚀 Three-Hurdle Solution Framework
 
-IARIS supports three active run modes: backend API, web dashboard, and Electron desktop app.
+### ❄️ 1. Cold Start Problem → Similarity Matching Engine
 
-### A) Start Backend API (FastAPI + WebSocket)
+**Problem:**
+New processes have no historical data.
 
-Start the adaptive engine API server:
+**What IARIS does:**
 
-```bash
-iaris serve
-```
+* Extracts a lightweight process signature
+* Matches it with known workloads
+* Uses closest match to bootstrap decision
 
-Default endpoints:
-* API root: `http://127.0.0.1:8000`
-* API docs: `http://127.0.0.1:8000/docs`
-* WebSocket stream: `ws://127.0.0.1:8000/ws`
-
-### B) Start Web Dashboard (React/Vite)
-
-In a separate terminal:
-
-```bash
-cd frontend
-npm run dev
-```
-
-### C) Start Desktop App (Electron)
-
-Launch the packaged desktop shell (builds frontend, opens Electron, and connects to backend):
-
-```bash
-cd frontend
-npm run electron:dev
-```
-
-Note:
-* The desktop process attempts to start the backend automatically on `127.0.0.1:8000`.
-* If a backend instance is already running on `127.0.0.1:8000`, Electron will connect to that instance.
-
-### Launching the Terminal Interface (TUI)
-To monitor processes, cache hit rates, and EWMA logic visually from your terminal:
-```bash
-iaris dashboard
-```
-
-### Additional CLI Commands
-
-```bash
-iaris demo
-iaris status
-iaris spawn cpu_hog --count 3
-```
+✅ **Benefit:**
+Smart decisions from the very first moment
 
 ---
 
-## ✅ Current Project Status
+### ⚡ 2. Overhead Problem → Delta-Based Caching
 
-Implemented and active:
-* Three-Hurdle backend framework (similarity, cache/delta, EWMA continuity).
-* FastAPI + WebSocket telemetry pipeline.
-* Multi-tab React analytics interface with simulation and insights workflows.
-* Impact analysis and knowledge-base panels.
-* Electron desktop integration with startup loading window + backend readiness polling.
+**Problem:**
+Continuous monitoring wastes CPU resources.
 
-Primary local development workflow:
+**What IARIS does:**
 
-```bash
-# Terminal 1
-.\venv\Scripts\Activate.ps1
-iaris serve
+* Stores previous results
+* Re-evaluates only when behavior changes
+* Skips unnecessary recomputation
 
-# Terminal 2
-cd frontend
-npm run electron:dev
-```
+✅ **Benefit:**
+Efficient and lightweight monitoring
 
 ---
 
-## 📚 Deep Dive Documentation
+### 🐌 3. Learning Delay Problem → EWMA Continuity Engine
 
-For developers looking to extend the IARIS framework, evaluate diagnostics, or modify heuristic values, refer to the included markdown guides:
+**Problem:**
+Traditional systems adapt too slowly.
 
-* [ARCHITECTURE.md](./ARCHITECTURE.md) - Deep dive into system design, flowcharts, and engine loops.
-* [IMPLEMENTATION_GUIDE.md](./IMPLEMENTATION_GUIDE.md) - Detailed tutorials on extending Similarity, Cache, and Learning components.
-* [IMPLEMENTATION_SUMMARY.md](./IMPLEMENTATION_SUMMARY.md) - Detailed post-implementation review of the Three-Hurdle Solution framework.
-* [QUICK_REFERENCE.md](./QUICK_REFERENCE.md) - Immediate cheatsheet for Python structures, classes, and tuning parameters.
-* [FILE_MANIFEST.md](./FILE_MANIFEST.md) - Exhaustive index of all repository files and their designated roles.
+**What IARIS does:**
+
+* Learns continuously
+* Updates gradually
+* Avoids abrupt changes
+
+✅ **Benefit:**
+Faster adaptation with stable behavior
+
+---
+
+## 🔥 How IARIS Is Different
+
+### Traditional Tools
+
+* Show CPU and memory usage
+* Allow process inspection or termination
+* Focus on fairness and visibility
+
+### IARIS
+
+* Learns process patterns
+* Predicts behavior
+* Adapts optimizations
+* Explains *why* changes happen
+
+### In Simple Words
+
+> Traditional tools are observers.
+> **IARIS is an observer + learner + optimizer.**
+
+---
+
+## 🏗️ System Architecture
+
+IARIS is designed as a **desktop application with a local backend and interactive dashboard**.
+
+### Core Layers
+
+* 🧠 **Backend Engine** — collects and processes behavior
+* 🔌 **API Layer** — connects backend to UI
+* 📊 **Visualization Layer** — graphs and insights
+* 📚 **Knowledge Layer** — stores learned patterns
+* 🎛️ **Tuning Layer** — allows controlled optimization
+* 🔮 **Simulation Layer** — previews outcomes
+
+### Stack (Current Direction)
+
+* Python backend
+* FastAPI API
+* React frontend
+* Desktop application shell
+* Real-time event streaming
+* Report export support
+
+---
+
+## 🖥️ Dashboard Structure
+
+### Main Tabs
+
+* 📊 Visualization
+* 💡 Key Insights
+* 📚 Knowledge Base
+* 📈 Impact Analysis
+* 🎛️ Tuning Panel
+* 🔮 What-If Simulator
+* 📡 Live Cache Trace Log
+
+### Why Tabs Matter
+
+Tabs keep the system:
+
+* Organized
+* Easy to navigate
+* Non-overwhelming
+
+Each tab has **one clear responsibility**, improving usability.
+
+---
+
+## 🎛️ Tuning Panel
+
+The tuning panel allows users to adjust system behavior.
+
+### Controls
+
+* Cold Start Threshold
+* Cache TTL
+* Learning Rate (EWMA Alpha)
+
+### What It Means
+
+* Higher learning rate → faster adaptation
+* Higher TTL → less recomputation
+* Higher threshold → more cautious decisions
+
+### Simple Meaning
+
+> “Make IARIS more aggressive, more stable, faster, or more conservative.”
+
+---
+
+## 🔮 What-If Simulator
+
+The What-If Simulator previews results **before applying changes**.
+
+### It Shows
+
+* Predicted cache hit rate
+* Predicted CPU overhead
+* Predicted convergence time
+* Predicted cold start accuracy
+* Warnings for risky configurations
+
+### Why It Matters
+
+* Prevents bad decisions
+* Builds confidence
+* Enables safe experimentation
+
+### Simple Meaning
+
+* Tuning Panel = **Change**
+* What-If Panel = **Check first**
+
+---
+
+## 🔁 Feedback Loop (Core Strength)
+
+1. User changes a setting
+2. System simulates outcome
+3. User reviews results
+4. User applies decision
+5. System learns from new state
+
+### Why This Is Powerful
+
+This creates a **safe, intelligent optimization cycle**.
+
+### Simple Analogy
+
+* 🎛️ Tuning Panel = Control knob
+* 🔮 What-If Panel = Preview screen
+* ✅ Apply = Commit
+
+---
+
+## 📡 Live Cache Trace Log
+
+Shows real-time system decisions:
+
+* Cache hit / miss
+* Cache eviction / save
+* Reason for decision
+* Estimated CPU saved
+
+### Important Note
+
+This is an **advanced/debug feature** and should remain optional for normal users.
+
+---
+
+## 📊 Graph Visualization
+
+Provides visual insights into:
+
+* CPU usage trends
+* Cache performance
+* Convergence improvements
+* Before vs after comparisons
+
+### Why It Helps
+
+Users can **see improvements**, not just assume them.
+
+---
+
+## 📦 Report Export
+
+Export system data for analysis.
+
+### Benefits
+
+* Save performance results
+* Compare multiple runs
+* Present findings to others
+* Validate system improvements
+
+---
+
+## 🖥️ Desktop Experience
+
+* Runs locally
+* No complex setup
+* User-friendly interface
+* Optional auto-start
+
+### Why This Matters
+
+* Easier to use
+* Better for demos
+* Accessible to non-technical users
+
+---
+
+## 🎨 User Experience Philosophy
+
+IARIS should feel like:
+
+* 🤖 A smart assistant
+* ❌ Not a complicated tool
+* ❌ Not a background burden
+
+### The Right Balance
+
+* Clean interface
+* Structured navigation
+* Hidden advanced details
+* Safe user controls
+* Visible proof of improvement
+
+---
+
+## 🎯 Problem Statement
+
+**IARIS solves inefficient and blind resource handling in desktop systems by learning process behavior, predicting needs, and optimizing resource allocation in real time.**
+
+### Short Version
+
+**IARIS makes computers smarter at managing resources by understanding what each process actually needs.**
+
+---
+
+## 💎 Final Value
+
+IARIS combines:
+
+* 🧠 Behavior learning
+* 🔮 Prediction
+* 📊 Visualization
+* 🎛️ User control
+* 🔁 Feedback loop
+
+👉 Result:
+
+> A complete **resource intelligence system** with transparency and control.
+
+---
+
+## 🚀 One-Line Summary
+
+**IARIS is a desktop-based, intent-aware system that learns, predicts, visualizes, and optimizes resource usage in real time.**
 
 ---
 
 <div align="center">
-  <b>IARIS</b> — <i>Built for completely adaptive, zero-constraint resource optimization.</i>
+
+### ⚡ Built for smarter, transparent, and adaptive computing
+
 </div>
